@@ -8,3 +8,6 @@ So, i write this.
 
 ## How to use it?
 This tool can not generate format automatically, you have to build the format step by step or import an existing one built by others.
+right click and you get all the options.
+
+push the source code later...
