@@ -9,5 +9,7 @@ So, i write this.
 ## How to use it?
 This tool can not generate format automatically, you have to build the format step by step or import an existing one built by others.
 right click and you get all the options.
+hope it will give you a little help while learning a file format.
 
-push the source code later...
+## warning
+The format will be save into a xml file, so the node's name must follow the naming convention of the xml.
