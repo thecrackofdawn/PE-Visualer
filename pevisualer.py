@@ -332,6 +332,7 @@ class AddDialog(wx.Dialog):
 class EditDialog(wx.Dialog):
     def __init__(self, parent, nid):
         wx.Dialog.__init__(self, None)
+        self.SetMaxSize((1000, 800))
         self.parent = parent
         self.nid = nid
         attrs = self.parent.GetPyData(nid)
@@ -349,6 +350,7 @@ class EditDialog(wx.Dialog):
             self.grid.SetCellValue(row, 1, value)
             row += 1
         self.grid.AutoSize()
+        self.grid.SetSize(self.GetSize())
         sizer.Add(self.grid, 1, wx.EXPAND)
         panel = wx.Panel(self)
         okButton = wx.Button(panel, wx.ID_OK, 'OK', pos=(30, 10), size=(50, -1))
@@ -357,7 +359,7 @@ class EditDialog(wx.Dialog):
         cancelButton = wx.Button(panel, wx.ID_CANCEL, 'cancel', pos=(130, 10), size=(50, -1))
         sizer.Add(panel, flag=wx.CENTER)
         self.SetSizer(sizer)
-        self.FitInside()
+        self.Fit()
         
     def OnAdd(self, event):
         self.grid.AppendRows(1)
@@ -368,9 +370,8 @@ class InfoPanel(wx.grid.Grid):
         wx.grid.Grid.__init__(self, parent)
         
         self.CreateGrid(0, 1)
-        attr = wx.grid.GridCellAttr()
-        attr.SetRenderer(wx.grid.GridCellEnumRenderer())
-        self.SetColAttr(1, attr)
+        self.SetDefaultRenderer(wx.grid.GridCellEnumRenderer())
+        self.SetDefaultEditor(wx.grid.GridCellAutoWrapStringEditor())
         self.HideColLabels()
         for info in info_dict:
             self.AppendRows(1)
@@ -378,7 +379,7 @@ class InfoPanel(wx.grid.Grid):
             self.SetRowLabelValue(cnum, info)
             font = self.GetCellFont(cnum, 0)
             self.SetCellValue(cnum, 0, info_dict[info])
-            self.SetReadOnly(cnum, 0)
+            #self.SetReadOnly(cnum, 0)
         self.AutoSize()
         
     def OnUpdate(self, info_dict):
