@@ -71,10 +71,8 @@ class PETreeCtrl(wx.TreeCtrl):
     def OnSelection(self, event):
         id = event.GetItem()
         page_num = self.main_frame.pe_infos.GetPageCount()
-        if page_num == 0:
-            self.main_frame.pe_infos.AddPage(InfoPanel(self.main_frame.pe_infos, self.GetPyData(id)), 'info')
-        else:
-            self.main_frame.pe_infos.GetPage(0).OnUpdate(self.GetPyData(id))
+        self.main_frame.pe_infos.DeleteAllPages()
+        self.main_frame.pe_infos.AddPage(InfoPanel(self.main_frame.pe_infos, self.GetPyData(id)), 'info')
         #FNB.FlatNotebook.GetPage(page)
     
     def OnShowPopup(self, event):
@@ -92,7 +90,7 @@ class PETreeCtrl(wx.TreeCtrl):
         if isinstance(event, str):
             xml_path = event
         else:
-            dlg = wx.FileDialog(None, 'save to', os.getcwd(), '', 'xml(*.xml)|*.xml')
+            dlg = wx.FileDialog(None, 'save to', '', '', 'xml(*.xml)|*.xml')
             if dlg.ShowModal() == wx.ID_OK:
                 xml_path = dlg.GetPath()
             else:
@@ -112,9 +110,17 @@ class PETreeCtrl(wx.TreeCtrl):
             added = {}
             for node, elem in new_add.items():
                 for elemc in elem.childNodes:
+                    if elemc.firstChild and elemc.firstChild.nodeType == 3:
+                        continue
+                    attrs = []
+                    for elemcc in elemc.childNodes:
+                        if elemcc.firstChild and elemcc.firstChild.nodeType == 3:
+                            attrs.append((elemcc.nodeName, elemcc.firstChild.nodeValue))   
                     nodec = self.AppendItem(node,elemc.nodeName)
-                    self.SetPyData(nodec, dict(elemc.attributes.items()))
+                    self.SetPyData(nodec, dict(attrs))
                     added[nodec] = elemc
+    
+                    
             new_add = added
         
     def saver(self, event):
@@ -141,11 +147,14 @@ class PETreeCtrl(wx.TreeCtrl):
                     elemc = dom.createElement(self.GetItemText(nodec))
                     elem.appendChild(elemc)
                     for name, value in self.GetPyData(nodec).items():
-                        elemc.setAttribute(name, value)
+                        text_elem = dom.createElement(name)
+                        text = dom.createTextNode(value)
+                        text_elem.appendChild(text)
+                        elemc.appendChild(text_elem)
                     added[nodec] = elemc  
                     nodec, cookie = self.GetNextChild(node, cookie)
             new_add = added
-        dom.writexml(open(xml_path, 'w'))
+        open(xml_path, 'w').write(dom.toxml(encoding='utf-8'))
     
     def rebuild(self, event):
         dialog = AddDialog(self, 'build a new tree')
@@ -298,7 +307,7 @@ class AddDialog(wx.Dialog):
             
         if not node_name in self.nodes:
             self.nodes[node_name] = OrderedDict()
-        self.nodes[node_name][attr_name] = self.value.GetValue()
+        self.nodes[node_name][attr_name] = self.value.GetValue() if self.value.GetValue() else ' '
         self.info.Clear()
         showpos = 0
         for name in self.nodes:
@@ -354,40 +363,36 @@ class EditDialog(wx.Dialog):
         self.grid.AppendRows(1)
         
              
-class InfoPanel(wx.Panel):
+class InfoPanel(wx.grid.Grid):
     def __init__(self, parent, info_dict):
-        wx.Panel.__init__(self, parent)
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        self.grid = wx.grid.Grid(self, -1)
-        self.grid.CreateGrid(0, 1)
+        wx.grid.Grid.__init__(self, parent)
+        
+        self.CreateGrid(0, 1)
         attr = wx.grid.GridCellAttr()
         attr.SetRenderer(wx.grid.GridCellEnumRenderer())
-        self.grid.SetColAttr(1, attr)
-        self.grid.HideColLabels()
+        self.SetColAttr(1, attr)
+        self.HideColLabels()
         for info in info_dict:
-            self.grid.AppendRows(1)
-            cnum = self.grid.GetNumberRows() -1
-            self.grid.SetRowLabelValue(cnum, info)
-            font = self.grid.GetCellFont(cnum, 0)
-            self.grid.SetCellValue(cnum, 0, info_dict[info])
-            self.grid.SetReadOnly(cnum, 0)
-        self.grid.AutoSize()
-        
-        self.SetSizer(sizer)
-        self.FitInside()
+            self.AppendRows(1)
+            cnum = self.GetNumberRows() -1
+            self.SetRowLabelValue(cnum, info)
+            font = self.GetCellFont(cnum, 0)
+            self.SetCellValue(cnum, 0, info_dict[info])
+            self.SetReadOnly(cnum, 0)
+        self.AutoSize()
         
     def OnUpdate(self, info_dict):
-        self.grid.DeleteRows(0, self.grid.GetNumberRows())
-        self.grid.ForceRefresh()
+        if self.GetNumberRows():
+            self.DeleteRows(0, self.GetNumberRows())
         for info in info_dict:
-            self.grid.AppendRows(1)
-            cnum = self.grid.GetNumberRows() -1
-            self.grid.SetRowLabelValue(cnum, info)
-            font = self.grid.GetCellFont(cnum, 0)
-            self.grid.SetCellValue(cnum, 0, info_dict[info])
-            self.grid.SetReadOnly(cnum, 0)
-        self.grid.AutoSize()
-        self.grid.SetSize(self.GetSize())
+            self.AppendRows(1)
+            cnum = self.GetNumberRows() -1
+            self.SetRowLabelValue(cnum, info)
+            font = self.GetCellFont(cnum, 0)
+            self.SetCellValue(cnum, 0, info_dict[info])
+            self.SetReadOnly(cnum, 0)
+        self.AutoSize()
+        
 
 class App(wx.App):
     def OnInit(self):
