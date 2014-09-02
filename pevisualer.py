@@ -54,6 +54,7 @@ class PETreeCtrl(wx.TreeCtrl):
         if dlg.ShowModal() == wx.ID_YES:
             nid = self.GetSelection()
             self.Delete(nid)
+        dlg.Destroy()
         
     def EditNode(self, event):
         nid = self.GetSelection()
@@ -62,11 +63,13 @@ class PETreeCtrl(wx.TreeCtrl):
         if dlg.ShowModal() == wx.ID_OK:
             row_num = dlg.grid.GetNumberRows()
             new_attrs = OrderedDict()
-            for i in range(row_num):
+            self.SetItemText(nid, dlg.grid.GetCellValue(0, 0))
+            for i in range(1, row_num):
                 if dlg.grid.GetCellValue(i, 0):
                     new_attrs[dlg.grid.GetCellValue(i, 0)] = dlg.grid.GetCellValue(i, 1)
             attrs = self.GetPyData(nid)
             attrs.update(new_attrs)
+        dlg.Destroy()
         
     def OnSelection(self, event):
         id = event.GetItem()
@@ -124,7 +127,7 @@ class PETreeCtrl(wx.TreeCtrl):
             new_add = added
         
     def saver(self, event):
-        dlg = wx.FileDialog(None, 'save to', '', '', 'All files(*.*)|*.*|xml(*.xml)|*.xml', style=wx.SAVE)
+        dlg = wx.FileDialog(None, 'save to', '', '', 'xml(*.xml)|*.xml', style=wx.SAVE)
         if dlg.ShowModal() == wx.ID_OK:
             xml_path = dlg.GetPath()
         else:
@@ -187,6 +190,7 @@ class PETreeCtrl(wx.TreeCtrl):
             for node in nodes:
                 id = self.AppendItem(itid, node)
                 self.SetPyData(id, nodes[node])
+        dialog.Destroy()
                 
     def OnShowDetails(self, event):
         if self.main_frame.sp.IsSplit():
@@ -332,11 +336,12 @@ class AddDialog(wx.Dialog):
 class EditDialog(wx.Dialog):
     def __init__(self, parent, nid):
         wx.Dialog.__init__(self, None)
+        self.SetMinSize((500, 400))
         self.SetMaxSize((1000, 800))
         self.parent = parent
         self.nid = nid
         attrs = self.parent.GetPyData(nid)
-        row_num = len(attrs)
+        row_num = len(attrs) + 1
         sizer = wx.BoxSizer(wx.VERTICAL)
         self.grid = wx.grid.Grid(self, -1)
         self.grid.CreateGrid(row_num, 2)
@@ -344,10 +349,16 @@ class EditDialog(wx.Dialog):
         self.grid.SetDefaultEditor(wx.grid.GridCellAutoWrapStringEditor())
         self.grid.HideColLabels()
         self.grid.HideRowLabels()
-        row = 0
+        name = self.parent.GetItemText(nid)
+        self.grid.SetCellSize(0, 0, 1, 2)
+        self.grid.SetCellValue(0, 0, name)
+        self.grid.SetCellAlignment(0, 0, wx.ALIGN_CENTRE, wx.ALIGN_CENTRE)
+        print self.grid.GetCellAlignment(0,0)
+        row = 1
         for name, value in attrs.items():
             self.grid.SetCellValue(row, 0, name)
             self.grid.SetCellValue(row, 1, value)
+            self.grid.SetCellBackgroundColour(0, 0, 'gray')
             row += 1
         self.grid.AutoSize()
         self.grid.SetSize(self.GetSize())
@@ -375,12 +386,14 @@ class InfoPanel(wx.grid.Grid):
         self.HideColLabels()
         for info in info_dict:
             self.AppendRows(1)
-            cnum = self.GetNumberRows() -1
-            self.SetRowLabelValue(cnum, info)
-            font = self.GetCellFont(cnum, 0)
-            self.SetCellValue(cnum, 0, info_dict[info])
+            rnum = self.GetNumberRows() -1
+            self.SetRowLabelValue(rnum, info)
+            font = self.GetCellFont(rnum, 0)
+            self.SetCellValue(rnum, 0, info_dict[info])
             #self.SetReadOnly(cnum, 0)
         self.AutoSize()
+        #self.AppendRows(1)
+        #self.SetCellRenderer(rnum+1, 0, ButtonRenderer())
         
     def OnUpdate(self, info_dict):
         if self.GetNumberRows():
@@ -394,6 +407,20 @@ class InfoPanel(wx.grid.Grid):
             self.SetReadOnly(cnum, 0)
         self.AutoSize()
         
+class ButtonRenderer(wx.grid.PyGridCellRenderer):
+    def __init__(self):
+        wx.grid.PyGridCellRenderer.__init__(self)
+    
+    def Draw(self, grid, attr, dc, rect, row, col, isSelected):
+        rend = wx.RendererNative_GetDefault()
+        rend.DrawPushButton(grid, dc, rect)
+        dc.DrawLabel('click', rect, wx.ALIGN_CENTER)
+        
+    def GetBestSize(self):
+        return wx.Size(40, 40)
+    
+    def Clone(self):
+        return ButtonRenderer()
 
 class App(wx.App):
     def OnInit(self):
