@@ -3,6 +3,10 @@ import os
 import wx
 import wx.grid
 from wx.lib.wordwrap import wordwrap
+from wx.tools import img2py
+import tempfile
+from wx.tools.img2py import img2py
+from wx.lib.embeddedimage import PyEmbeddedImage
 try:
     import agw.flatnotebook as FNB
 except ImportError: # if it's not there locally, try the wxPython lib.
@@ -57,6 +61,15 @@ class PETreeCtrl(wx.TreeCtrl):
         dlg.Destroy()
         
     def EditNode(self, event):
+        def img_to_str(img):
+            file = tempfile.mktemp(dir='')
+            img2py(img, file)
+            content = open(file, 'r').read()
+            if os.path.exists(file):
+                os.remove(file)
+            img = eval(content[content.find('=')+1:])
+            return img.data
+        
         nid = self.GetSelection()
         if not nid:return
         dlg = EditDialog(self, nid)
@@ -66,9 +79,19 @@ class PETreeCtrl(wx.TreeCtrl):
             self.SetItemText(nid, dlg.grid.GetCellValue(0, 0))
             for i in range(1, row_num):
                 if dlg.grid.GetCellValue(i, 0):
-                    new_attrs[dlg.grid.GetCellValue(i, 0)] = dlg.grid.GetCellValue(i, 1)
-            attrs = self.GetPyData(nid)
-            attrs.update(new_attrs)
+                    if dlg.grid.GetCellValue(i, 2) == 'img':
+                        img = dlg.grid.GetCellValue(i, 1)
+                        new_attrs[dlg.grid.GetCellValue(i, 0)] = {'value':dlg.image_data[i],
+                                                              'type':'img'}
+                    elif dlg.grid.GetCellValue(i, 2) == 'img-new':
+                        path = dlg.grid.GetCellValue(i, 1)
+                        img = img_to_str(path)
+                        new_attrs[dlg.grid.GetCellValue(i, 0)] = {'value':img,
+                                                              'type':'img'}
+                    else:
+                        new_attrs[dlg.grid.GetCellValue(i, 0)] = {'value':dlg.grid.GetCellValue(i, 1),
+                                                              'type':dlg.grid.GetCellValue(i, 2)}
+            self.SetPyData(nid, new_attrs)
         dlg.Destroy()
         
     def OnSelection(self, event):
@@ -89,13 +112,14 @@ class PETreeCtrl(wx.TreeCtrl):
         
         
     def parser(self, event):
-        self.DeleteAllItems()
         if isinstance(event, str):
+            self.DeleteAllItems()
             xml_path = event
         else:
             dlg = wx.FileDialog(None, 'save to', '', '', 'xml(*.xml)|*.xml')
             if dlg.ShowModal() == wx.ID_OK:
                 xml_path = dlg.GetPath()
+                self.DeleteAllItems()
             else:
                 dlg.Destroy()
                 return
@@ -104,11 +128,17 @@ class PETreeCtrl(wx.TreeCtrl):
         try:
             dom = minidom.parse(xml_path)
         except Exception, err:
+            wx.MessageBox('somethong is wrong while parsing the xml: %s'%err.message,  'sorry', wx.ICON_ERROR)
             return
+        #add first element
         root_elem = dom.documentElement
         root_node = self.AddRoot(root_elem.nodeName)
-        self.SetPyData(root_node, dict(root_elem.attributes.items()))
-        new_add = {root_node:root_elem}
+        #elem_attrs = dict(root_elem.attributes.items())
+        #self.SetPyData(root_node, dict(root_elem.attributes.items()))
+        class agent:pass
+        elem_agent = agent()
+        elem_agent.childNodes = [root_elem]
+        new_add = {root_node:elem_agent}
         while new_add:
             added = {}
             for node, elem in new_add.items():
@@ -118,9 +148,19 @@ class PETreeCtrl(wx.TreeCtrl):
                     attrs = []
                     for elemcc in elemc.childNodes:
                         if elemcc.firstChild and elemcc.firstChild.nodeType == 3:
-                            attrs.append((elemcc.nodeName, elemcc.firstChild.nodeValue))   
-                    nodec = self.AppendItem(node,elemc.nodeName)
-                    self.SetPyData(nodec, dict(attrs))
+                            elem_attrs = dict(elemcc.attributes.items())
+                            if 'type' in elem_attrs:
+                                attrs.append((elemcc.nodeName, {'value':elemcc.firstChild.nodeValue,\
+                                                                 'type':elem_attrs['type']}))
+                            else:
+                                attrs.append((elemcc.nodeName, {'value':elemcc.firstChild.nodeValue,\
+                                                                 'type':'txt'}))
+                    if isinstance(elem, agent):
+                        nodec = root_node
+                    else:   
+                        nodec = self.AppendItem(node,elemc.nodeName)
+                    if not attrs:attrs.append(('nothing', {'type':'txt', 'value':' '}))
+                    self.SetPyData(nodec, OrderedDict(attrs))
                     added[nodec] = elemc
     
                     
@@ -139,8 +179,14 @@ class PETreeCtrl(wx.TreeCtrl):
         if not root_node: return 
         dom = dim.createDocument(None, self.GetItemText(root_node), None)
         root_elem = dom.documentElement
+        #for name, value in self.GetPyData(root_node).items():
+        #    root_elem.setAttribute(name, value)
         for name, value in self.GetPyData(root_node).items():
-            root_elem.setAttribute(name, value)
+            text_elem = dom.createElement(name)
+            text = dom.createTextNode(value['value'])
+            text_elem.setAttribute('type', value['type'])
+            text_elem.appendChild(text)
+            root_elem.appendChild(text_elem)
         new_add = {root_node:root_elem}
         while new_add:
             added = {}
@@ -151,7 +197,8 @@ class PETreeCtrl(wx.TreeCtrl):
                     elem.appendChild(elemc)
                     for name, value in self.GetPyData(nodec).items():
                         text_elem = dom.createElement(name)
-                        text = dom.createTextNode(value)
+                        text = dom.createTextNode(value['value'])
+                        text_elem.setAttribute('type', value['type'])
                         text_elem.appendChild(text)
                         elemc.appendChild(text_elem)
                     added[nodec] = elemc  
@@ -251,8 +298,11 @@ class AddDialog(wx.Dialog):
         stbox_sizer.Add(panel)
         self.Bind(wx.EVT_CHOICE, self.OnChoice, self.attr)
         stbox_sizer.Add(wx.StaticText(add_panel, -1, 'value'))
-        self.value = wx.TextCtrl(add_panel, -1, pos=(5, 125), style=wx.TE_MULTILINE)
-        stbox_sizer.Add(self.value)
+        panel = wx.Panel(add_panel)
+        self.value = wx.TextCtrl(panel, -1, style=wx.TE_MULTILINE)
+        self.is_img = wx.CheckBox(panel, -1, 'image', pos=(130, 10))
+        self.Bind(wx.EVT_CHECKBOX, self.OnImg, self.is_img)
+        stbox_sizer.Add(panel)
         bmp = add_butt_img.GetBitmap()
         add_butt = wx.BitmapButton(add_panel, -1, bmp)
         self.Bind(wx.EVT_BUTTON, self.OnAddButt, add_butt)
@@ -286,6 +336,16 @@ class AddDialog(wx.Dialog):
             self.new_attr.Enable()
         else:
             self.new_attr.Disable()
+            
+    def OnImg(self, event):
+        if not self.is_img.GetValue():
+            return 
+        dlg = wx.FileDialog(None)
+        if dlg.ShowModal() == wx.ID_OK:
+            self.value.SetValue(dlg.GetPath())
+        else:
+            self.is_img.SetValue(False)
+        dlg.Destroy()
     
     def OnAddButt(self, event):
         invaild_item = None
@@ -309,9 +369,24 @@ class AddDialog(wx.Dialog):
             self.info.WriteText(text)
             self.nodes_pos[node_name][1] += len(text)
             
+        def img_to_str(img):
+            file = tempfile.mktemp(dir='')
+            img2py(img, file)
+            content = open(file, 'r').read()
+            if os.path.exists(file):
+                os.remove(file)
+            img = eval(content[content.find('=')+1:])
+            return img.data
+            
         if not node_name in self.nodes:
             self.nodes[node_name] = OrderedDict()
-        self.nodes[node_name][attr_name] = self.value.GetValue() if self.value.GetValue() else ' '
+        self.nodes[node_name][attr_name] = {}
+        if self.is_img.GetValue():
+            self.nodes[node_name][attr_name]['value'] = img_to_str(self.value.GetValue())
+            self.nodes[node_name][attr_name]['type'] = 'img' 
+        else:
+            self.nodes[node_name][attr_name]['value'] = self.value.GetValue() if self.value.GetValue() else ' '
+            self.nodes[node_name][attr_name]['type'] = 'txt' 
         self.info.Clear()
         showpos = 0
         for name in self.nodes:
@@ -326,12 +401,16 @@ class AddDialog(wx.Dialog):
                 self.info.AppendText(attr+'\n')
                 f = wx.Font(10, wx.DEFAULT, wx.NORMAL, wx.BOLD)
                 self.info.SetStyle(pos, self.info.LastPosition, wx.TextAttr('white', 'gray', f))
-                self.info.AppendText(self.nodes[name][attr]+'\n')
+                if self.nodes[name][attr]['type']  == 'img':
+                    self.info.AppendText('an image file...')
+                else:
+                    self.info.AppendText(self.nodes[name][attr]['value']+'\n')
         if showpos: self.info.ShowPosition(showpos-1)
         
         #clean
         self.new_attr.Clear()
         self.value.Clear()
+        self.is_img.SetValue(False)
    
 class EditDialog(wx.Dialog):
     def __init__(self, parent, nid):
@@ -344,21 +423,33 @@ class EditDialog(wx.Dialog):
         row_num = len(attrs) + 1
         sizer = wx.BoxSizer(wx.VERTICAL)
         self.grid = wx.grid.Grid(self, -1)
-        self.grid.CreateGrid(row_num, 2)
+        self.grid.CreateGrid(row_num, 4)
         self.grid.SetDefaultRenderer(wx.grid.GridCellEnumRenderer())
         self.grid.SetDefaultEditor(wx.grid.GridCellAutoWrapStringEditor())
         self.grid.HideColLabels()
         self.grid.HideRowLabels()
         name = self.parent.GetItemText(nid)
-        self.grid.SetCellSize(0, 0, 1, 2)
+        self.grid.SetCellSize(0, 0, 1, 4)
         self.grid.SetCellValue(0, 0, name)
-        self.grid.SetCellAlignment(0, 0, wx.ALIGN_CENTRE, wx.ALIGN_CENTRE)
-        print self.grid.GetCellAlignment(0,0)
+        self.grid.SetCellAlignment(0, 0, wx.ALIGN_LEFT, wx.ALIGN_CENTRE)
+        self.grid.SetCellBackgroundColour(0, 0, 'gray')
+        self.grid.GetGridWindow().Bind(wx.EVT_LEFT_DOWN, self.OnClick)
+        self.grid.Bind(wx.grid.EVT_GRID_CELL_LEFT_DCLICK, self.OnDoubleClick)
+        self.image_data = {}
         row = 1
         for name, value in attrs.items():
             self.grid.SetCellValue(row, 0, name)
-            self.grid.SetCellValue(row, 1, value)
-            self.grid.SetCellBackgroundColour(0, 0, 'gray')
+            if value['type'] == 'img':
+                self.grid.SetCellValue(row, 2, value['type'])
+                self.grid.SetCellValue(row, 1, 'this is an image...')
+                self.image_data[row] = value['value']
+                self.grid.SetReadOnly(row, 1)          
+            else:
+                self.grid.SetCellValue(row, 2, value['type'])
+                self.grid.SetCellValue(row, 1, value['value'])
+            self.grid.SetCellRenderer(row, 3, ButtonRenderer('delete'))
+            self.grid.SetReadOnly(row, 2)
+            self.grid.SetReadOnly(row, 3)
             row += 1
         self.grid.AutoSize()
         self.grid.SetSize(self.GetSize())
@@ -372,14 +463,71 @@ class EditDialog(wx.Dialog):
         self.SetSizer(sizer)
         self.Fit()
         
-    def OnAdd(self, event):
-        self.grid.AppendRows(1)
         
+    def OnAdd(self, event):
+        dlg = AddAttrDialog()
+        if dlg.ShowModal() == wx.ID_OK:
+            self.grid.AppendRows(1)
+            row = self.grid.GetNumberRows() - 1
+            self.grid.SetCellValue(row, 2, dlg.type.GetStringSelection())
+            if 'img' in dlg.type.GetStringSelection():
+                self.grid.SetReadOnly(row, 1)
+            self.grid.SetReadOnly(row, 2)
+            self.grid.SetReadOnly(row, 3)
+            self.grid.SetCellRenderer(row, 3, ButtonRenderer('delete'))
+            self.grid.AutoSize()
+            self.grid.SetSize(self.GetSize())
+        dlg.Destroy()
+        
+        
+    def OnClick(self, event):
+        x, y = self.grid.CalcUnscrolledPosition(event.GetX(), event.GetY())
+        coords = self.grid.XYToCell(x, y)
+        row = coords[0]
+        col = coords[1]
+        if isinstance(self.grid.GetCellRenderer(row, col), ButtonRenderer):
+            rect = self.grid.GetCellRenderer(row, col).butt_rect
+            if x >= rect.x and x <= rect.x+rect.width and \
+                y>=rect.y and y<=rect.y+rect.height:
+                dlg = wx.MessageDialog(None, 'Are you sure to delete it?', 'warning', wx.YES_NO|wx.ICON_WARNING)
+                if dlg.ShowModal() == wx.ID_YES:
+                    self.grid.DeleteRows(row, 1)
+                dlg.Destroy()
+            else:
+                event.Skip()
+        else:
+            event.Skip()
+        
+    def OnDoubleClick(self, event):
+        row = event.GetRow()
+        col = event.GetCol()
+        if col == 1 and 'img' in self.grid.GetCellValue(row, 2).strip():
+            dlg = wx.FileDialog(None)
+            if dlg.ShowModal() == wx.ID_OK:
+                self.grid.SetCellValue(row, col, dlg.GetPath())
+                self.grid.SetCellValue(row, 2, 'img-new')
+                self.grid.AutoSize()
+                self.grid.ForceRefresh()
+            dlg.Destroy()
+        else:
+            event.Skip()
+            
+class AddAttrDialog(wx.Dialog):
+    def __init__(self):
+        super(AddAttrDialog, self).__init__(None)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        self.type = wx.RadioBox(self, -1, 'type', choices=['txt', 'img'])
+        sizer.Add(self.type, 1, wx.EXPAND)
+        panel = wx.Panel(self)
+        wx.Button(panel, wx.ID_OK, 'ok', pos=(0, 5), size=(40, -1))
+        wx.Button(panel, wx.ID_CANCEL, 'no', pos=(50, 5), size=(40, -1))
+        sizer.Add(panel, 1, flag=wx.CENTER)
+        self.SetSizer(sizer)
+        self.Fit()
              
 class InfoPanel(wx.grid.Grid):
     def __init__(self, parent, info_dict):
         wx.grid.Grid.__init__(self, parent)
-        
         self.CreateGrid(0, 1)
         self.SetDefaultRenderer(wx.grid.GridCellEnumRenderer())
         self.SetDefaultEditor(wx.grid.GridCellAutoWrapStringEditor())
@@ -389,11 +537,32 @@ class InfoPanel(wx.grid.Grid):
             rnum = self.GetNumberRows() -1
             self.SetRowLabelValue(rnum, info)
             font = self.GetCellFont(rnum, 0)
-            self.SetCellValue(rnum, 0, info_dict[info])
-            #self.SetReadOnly(cnum, 0)
+            if isinstance(info_dict[info], dict):
+                if info_dict[info]['type'] == 'img':
+                    self.SetCellRenderer(rnum, 0, ButtonRenderer('show'))
+                    self.SetReadOnly(rnum, 0)
+                    self.SetCellValue(rnum, 0, info_dict[info]['value'])  
+                else:
+                    self.SetCellValue(rnum, 0, info_dict[info]['value'])
+            else:
+                self.SetCellValue(rnum, 0, info_dict[info])
         self.AutoSize()
-        #self.AppendRows(1)
-        #self.SetCellRenderer(rnum+1, 0, ButtonRenderer())
+        self.GetGridWindow().Bind(wx.EVT_LEFT_DOWN, self.OnLeftClick)
+    
+    def OnLeftClick(self, event):
+        x, y = self.CalcUnscrolledPosition(event.GetX(), event.GetY())
+        coords = self.XYToCell(x, y)
+        row = coords[0]
+        col = coords[1]
+        if isinstance(self.GetCellRenderer(row, col), ButtonRenderer):
+            rect = self.GetCellRenderer(row, col).butt_rect
+            if x >= rect.x and x <= rect.x+rect.width and \
+                y>=rect.y and y<=rect.y+rect.height:
+                ImageDialog(self.GetCellValue(row, col)).Show()
+            else:
+                event.Skip()
+        else:
+            event.Skip()
         
     def OnUpdate(self, info_dict):
         if self.GetNumberRows():
@@ -408,19 +577,33 @@ class InfoPanel(wx.grid.Grid):
         self.AutoSize()
         
 class ButtonRenderer(wx.grid.PyGridCellRenderer):
-    def __init__(self):
+    def __init__(self, label):
         wx.grid.PyGridCellRenderer.__init__(self)
+        self.label = label
     
     def Draw(self, grid, attr, dc, rect, row, col, isSelected):
         rend = wx.RendererNative_GetDefault()
-        rend.DrawPushButton(grid, dc, rect)
-        dc.DrawLabel('click', rect, wx.ALIGN_CENTER)
+        dc.SetBrush(wx.Brush('white', wx.SOLID))
+        dc.SetPen(wx.TRANSPARENT_PEN)
+        dc.DrawRectangleRect(rect)
+        self.butt_rect = wx.Rect(rect.x+10, rect.y+5, 50, 30)
+        rend.DrawPushButton(grid, dc, self.butt_rect, wx.ALIGN_CENTER)
+        dc.DrawLabel(self.label, wx.Rect(rect.x+10, rect.y+5, 40, 30), wx.ALIGN_CENTER)
         
-    def GetBestSize(self):
-        return wx.Size(40, 40)
+    def GetBestSize(self, grid, attr, dc, row, col):
+        return wx.Size(70, 40)
     
     def Clone(self):
-        return ButtonRenderer()
+        return ButtonRenderer(self.label)
+
+class ImageDialog(wx.Frame):
+    def __init__(self, img_data):
+        wx.Frame.__init__(self, None, -1)
+        self.SetIcon(pe.getIcon())  
+        img = PyEmbeddedImage(img_data)
+        wx.StaticBitmap(self, -1, img.getBitmap())
+        self.Fit()
+        
 
 class App(wx.App):
     def OnInit(self):
